@@ -1,0 +1,38 @@
+<!DOCTYPE Linker_Placement_File>
+<Root name="Flash Section Placement">
+  <MemorySegment name="FLASH1" size="$(FLASH_PH_SIZE)" start="$(FLASH_PH_START)">
+    <ProgramSection alignment="0x100" load="Yes" name=".vectors" start="$(FLASH_START)" />
+    <ProgramSection alignment="4" load="Yes" name=".init" />
+    <ProgramSection alignment="4" load="Yes" name=".init_rodata" />
+    <ProgramSection alignment="4" load="Yes" name=".text"/>
+    <ProgramSection address_symbol="__start_log_const_data" alignment="4" end_symbol="__stop_log_const_data" inputsections="*(SORT(.log_const_data*))" keep="Yes" load="Yes" name=".log_const_data" />
+    <ProgramSection address_symbol="__start_log_backends" alignment="4" end_symbol="__stop_log_backends" inputsections="*(SORT(.log_backends*))" keep="Yes" load="Yes" name=".log_backends" />
+    <ProgramSection address_symbol="__start_nrf_balloc" alignment="4" end_symbol="__stop_nrf_balloc" inputsections="*(.nrf_balloc*)" keep="Yes" load="Yes" name=".nrf_balloc" />
+    <ProgramSection address_symbol="__start_nrf_sections" alignment="4" keep="Yes" load="No" name=".nrf_sections" />
+    <ProgramSection alignment="4" inputsections="*(SORT(.log_dynamic_data*))" keep="Yes" load="Yes" name=".log_dynamic_data" runin=".log_dynamic_data_run" />
+    <ProgramSection alignment="4" inputsections="*(SORT(.log_filter_data*))" keep="Yes" load="Yes" name=".log_filter_data" runin=".log_filter_data_run" />
+    <ProgramSection alignment="4" load="Yes" name=".dtors" />
+    <ProgramSection alignment="4" load="Yes" name=".ctors" />
+    <ProgramSection alignment="4" load="Yes" name=".rodata"/>
+    <ProgramSection address_symbol="__exidx_start" alignment="4" end_symbol="__exidx_end" load="Yes" name=".ARM.exidx" />
+    <ProgramSection alignment="4" load="Yes" name=".fast" runin=".fast_run" />
+    <ProgramSection alignment="4" load="Yes" name=".data" runin=".data_run" />
+    <ProgramSection alignment="4" load="Yes" name=".tdata" runin=".tdata_run" />
+  </MemorySegment>
+  <MemorySegment name="RAM1" size="$(RAM_PH_SIZE)" start="$(RAM_PH_START)">
+    <ProgramSection address_symbol="__app_ram_start__" alignment="0x100" load="No" name=".vectors_ram" start="$(RAM_START)" />
+    <ProgramSection address_symbol="__start_nrf_sections_run" alignment="4" keep="Yes" load="No" name=".nrf_sections_run" />
+    <ProgramSection address_symbol="__start_log_dynamic_data" alignment="4" end_symbol="__stop_log_dynamic_data" keep="Yes" load="No" name=".log_dynamic_data_run" />
+    <ProgramSection address_symbol="__start_log_filter_data" alignment="4" end_symbol="__stop_log_filter_data" keep="Yes" load="No" name=".log_filter_data_run" />
+    <ProgramSection address_symbol="__end_nrf_sections_run" alignment="4" keep="Yes" load="No" name=".nrf_sections_run_end" />
+    <ProgramSection alignment="4" load="No" name=".fast_run" />
+    <ProgramSection alignment="4" load="No" name=".data_run" />
+    <ProgramSection alignment="4" load="No" name=".tdata_run" />
+    <ProgramSection alignment="4" load="No" name=".bss" />
+    <ProgramSection alignment="4" load="No" name=".tbss" />
+    <ProgramSection alignment="4" load="No" name=".non_init" />
+    <ProgramSection alignment="4" load="No" name=".heap" size="__HEAPSIZE__" />
+    <ProgramSection address_symbol="__StackLimit" alignment="8" end_symbol="__StackTop" load="No" name=".stack" place_from_segment_end="Yes" size="__STACKSIZE__" />
+    <ProgramSection alignment="8" load="No" name=".stack_process" size="__STACKSIZE_PROCESS__" />
+  </MemorySegment>
+</Root>

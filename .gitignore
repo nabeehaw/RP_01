@@ -1,0 +1,4 @@
+Output/ 
+obj/ 
+*.o 
+*.emSession 
