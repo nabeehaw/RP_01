@@ -61,6 +61,9 @@
       <file file_name="platform.c" />
       <file file_name="platform.h" />
       <file file_name="../config/sdk_config.h" />
+      <file file_name="testdsp.c">
+        <configuration Name="Debug" build_exclude_from_build="Yes" />
+      </file>
     </folder>
     <folder Name="Board Definition">
       <file file_name="../../../../../../components/boards/boards.c" />
