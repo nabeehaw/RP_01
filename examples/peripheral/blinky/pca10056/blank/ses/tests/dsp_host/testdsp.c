@@ -42,7 +42,7 @@ static void test_sine_100uV_100Hz(void)
         }
     }
 
-    printf("Expected RMS ≈ %.2f uV\n", amp_uV / (float)sqrt(2.0));
+    printf("Expected RMS: approx. %.2f uV\n", amp_uV / (float)sqrt(2.0));
     printf("\n");
 }
 
@@ -76,9 +76,48 @@ static void test_dc_1000_counts(void)
     printf("\n");
 }
 
+static void test_sine_100uV_5Hz(void)
+{
+    printf("=== Test 3: 100 uV, 5 Hz sine (below 20 Hz cutoff) ===\n");
+
+    dsp_channel_t ch;
+    dsp_channel_init(&ch, true); // notch on (doesn't really matter at 5 Hz)
+
+    const float fs      = (float)DSP_FS_HZ;    // 2000 Hz
+    const float freq    = 5.0f;               // 5 Hz (below 20 Hz HPF cutoff)
+    const float amp_uV  = 100.0f;             // 100 µV peak
+    const float amp_cnt = amp_uV / DSP_LSB_UV;
+
+    const uint32_t total_samples = 10u * DSP_WINDOW_SAMPLES; // 10 windows
+
+    dsp_features_t feat;
+    uint32_t frame_idx = 0u;
+
+    for (uint32_t n = 0; n < total_samples; ++n)
+    {
+        float t   = (float)n / fs;
+        float val = amp_cnt * sinf(2.0f * 3.14159265358979f * freq * t);
+        int32_t raw_code = (int32_t)val;
+
+        bool ready = dsp_process_sample(&ch, raw_code, &feat);
+        if (ready)
+        {
+            frame_idx++;
+            printf("Frame %2lu: RMS = %.4f uV (MDF=%.1f Hz)\n",
+                   (unsigned long)frame_idx,
+                   feat.rms_uV, feat.mdf_Hz);
+        }
+    }
+
+    printf("Ideal (no filtering) RMS for 100 uV sine would be about 70.7 uV.\n");
+    printf("Expect a MUCH smaller RMS because 5 Hz is well below the 20 Hz HPF cutoff.\n\n");
+}
+
 int main(void)
 {
     test_sine_100uV_100Hz();
     test_dc_1000_counts();
+    test_sine_100uV_5Hz();
+
     return 0;
 }

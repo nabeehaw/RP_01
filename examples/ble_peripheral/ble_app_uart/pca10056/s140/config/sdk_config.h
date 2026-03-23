@@ -3539,41 +3539,38 @@
 
 // </e>
 
+// <e> _ENABLED - nrfx_spim - SPIM peripheral driver
+//==========================================================
+
+// <q> NRFX_SPIM_EXTENDED_ENABLED  - Enable extended SPIM features
 // <e> NRFX_SPIM_ENABLED - nrfx_spim - SPIM peripheral driver
 //==========================================================
 #ifndef NRFX_SPIM_ENABLED
-#define NRFX_SPIM_ENABLED 0
+#define NRFX_SPIM_ENABLED 1
 #endif
-// <q> NRFX_SPIM0_ENABLED  - Enable SPIM0 instance
- 
 
+// <q> NRFX_SPIM0_ENABLED  - Enable SPIM0 instance
 #ifndef NRFX_SPIM0_ENABLED
-#define NRFX_SPIM0_ENABLED 0
+#define NRFX_SPIM0_ENABLED 1
 #endif
 
 // <q> NRFX_SPIM1_ENABLED  - Enable SPIM1 instance
- 
-
 #ifndef NRFX_SPIM1_ENABLED
 #define NRFX_SPIM1_ENABLED 0
 #endif
 
 // <q> NRFX_SPIM2_ENABLED  - Enable SPIM2 instance
- 
-
 #ifndef NRFX_SPIM2_ENABLED
 #define NRFX_SPIM2_ENABLED 0
 #endif
 
 // <q> NRFX_SPIM3_ENABLED  - Enable SPIM3 instance
- 
-
 #ifndef NRFX_SPIM3_ENABLED
 #define NRFX_SPIM3_ENABLED 0
 #endif
 
-// <q> NRFX_SPIM_EXTENDED_ENABLED  - Enable extended SPIM features
- 
+#define NRFX_SPIM_MISO_PULL_CFG 1
+#define NRFX_SPIM_DEFAULT_CONFIG_IRQ_PRIORITY 6
 
 #ifndef NRFX_SPIM_EXTENDED_ENABLED
 #define NRFX_SPIM_EXTENDED_ENABLED 0
@@ -3585,9 +3582,6 @@
 // <1=> NRF_GPIO_PIN_PULLDOWN 
 // <3=> NRF_GPIO_PIN_PULLUP 
 
-#ifndef NRFX_SPIM_MISO_PULL_CFG
-#define NRFX_SPIM_MISO_PULL_CFG 1
-#endif
 
 // <o> NRFX_SPIM_DEFAULT_CONFIG_IRQ_PRIORITY  - Interrupt priority
  
@@ -3599,10 +3593,6 @@
 // <5=> 5 
 // <6=> 6 
 // <7=> 7 
-
-#ifndef NRFX_SPIM_DEFAULT_CONFIG_IRQ_PRIORITY
-#define NRFX_SPIM_DEFAULT_CONFIG_IRQ_PRIORITY 6
-#endif
 
 // <e> NRFX_SPIM_CONFIG_LOG_ENABLED - Enables logging in the module.
 //==========================================================
@@ -4467,7 +4457,7 @@
 // <e> NRFX_UARTE_ENABLED - nrfx_uarte - UARTE peripheral driver
 //==========================================================
 #ifndef NRFX_UARTE_ENABLED
-#define NRFX_UARTE_ENABLED 1
+#define NRFX_UARTE_ENABLED 0
 #endif
 // <o> NRFX_UARTE0_ENABLED - Enable UARTE0 instance 
 #ifndef NRFX_UARTE0_ENABLED
@@ -4593,7 +4583,7 @@
 // <e> NRFX_UART_ENABLED - nrfx_uart - UART peripheral driver
 //==========================================================
 #ifndef NRFX_UART_ENABLED
-#define NRFX_UART_ENABLED 1
+#define NRFX_UART_ENABLED 0
 #endif
 // <o> NRFX_UART0_ENABLED - Enable UART0 instance 
 #ifndef NRFX_UART0_ENABLED
@@ -5619,24 +5609,6 @@
 
 // </e>
 
-// <e> SPI_ENABLED - nrf_drv_spi - SPI/SPIM peripheral driver - legacy layer
-//==========================================================
-#ifndef SPI_ENABLED
-#define SPI_ENABLED 0
-#endif
-// <o> SPI_DEFAULT_CONFIG_IRQ_PRIORITY  - Interrupt priority
- 
-
-// <i> Priorities 0,2 (nRF51) and 0,1,4,5 (nRF52) are reserved for SoftDevice
-// <0=> 0 (highest) 
-// <1=> 1 
-// <2=> 2 
-// <3=> 3 
-// <4=> 4 
-// <5=> 5 
-// <6=> 6 
-// <7=> 7 
-
 #ifndef SPI_DEFAULT_CONFIG_IRQ_PRIORITY
 #define SPI_DEFAULT_CONFIG_IRQ_PRIORITY 6
 #endif
@@ -5651,11 +5623,6 @@
 #define NRF_SPI_DRV_MISO_PULLUP_CFG 1
 #endif
 
-// <e> SPI0_ENABLED - Enable SPI0 instance
-//==========================================================
-#ifndef SPI0_ENABLED
-#define SPI0_ENABLED 0
-#endif
 // <q> SPI0_USE_EASY_DMA  - Use EasyDMA
  
 
@@ -5663,13 +5630,6 @@
 #define SPI0_USE_EASY_DMA 1
 #endif
 
-// </e>
-
-// <e> SPI1_ENABLED - Enable SPI1 instance
-//==========================================================
-#ifndef SPI1_ENABLED
-#define SPI1_ENABLED 0
-#endif
 // <q> SPI1_USE_EASY_DMA  - Use EasyDMA
  
 
@@ -5677,13 +5637,6 @@
 #define SPI1_USE_EASY_DMA 1
 #endif
 
-// </e>
-
-// <e> SPI2_ENABLED - Enable SPI2 instance
-//==========================================================
-#ifndef SPI2_ENABLED
-#define SPI2_ENABLED 0
-#endif
 // <q> SPI2_USE_EASY_DMA  - Use EasyDMA
  
 
@@ -5956,7 +5909,7 @@
 // <e> UART_ENABLED - nrf_drv_uart - UART/UARTE peripheral driver - legacy layer
 //==========================================================
 #ifndef UART_ENABLED
-#define UART_ENABLED 1
+#define UART_ENABLED 0
 #endif
 // <o> UART_DEFAULT_CONFIG_HWFC  - Hardware Flow Control
  
@@ -6033,7 +5986,7 @@
 // <e> UART0_ENABLED - Enable UART0 instance
 //==========================================================
 #ifndef UART0_ENABLED
-#define UART0_ENABLED 1
+#define UART0_ENABLED 0
 #endif
 // <q> UART0_CONFIG_USE_EASY_DMA  - Default setting for using EasyDMA
  
@@ -6356,7 +6309,7 @@
 // <e> APP_UART_ENABLED - app_uart - UART driver
 //==========================================================
 #ifndef APP_UART_ENABLED
-#define APP_UART_ENABLED 1
+#define APP_UART_ENABLED 0
 #endif
 // <o> APP_UART_DRIVER_INSTANCE  - UART instance used
  
@@ -7494,7 +7447,7 @@
  
 
 #ifndef RETARGET_ENABLED
-#define RETARGET_ENABLED 1
+#define RETARGET_ENABLED 0
 #endif
 
 // <q> SLIP_ENABLED  - slip - SLIP encoding and decoding
@@ -11928,12 +11881,12 @@
 // <2=> NRF_CLOCK_LF_SRC_SYNTH 
 
 #ifndef NRF_SDH_CLOCK_LF_SRC
-#define NRF_SDH_CLOCK_LF_SRC 1
+#define NRF_SDH_CLOCK_LF_SRC 0
 #endif
 
 // <o> NRF_SDH_CLOCK_LF_RC_CTIV - SoftDevice calibration timer interval. 
 #ifndef NRF_SDH_CLOCK_LF_RC_CTIV
-#define NRF_SDH_CLOCK_LF_RC_CTIV 0
+#define NRF_SDH_CLOCK_LF_RC_CTIV 16
 #endif
 
 // <o> NRF_SDH_CLOCK_LF_RC_TEMP_CTIV - SoftDevice calibration timer interval under constant temperature. 
@@ -11941,7 +11894,7 @@
 // <i>  if the temperature has not changed.
 
 #ifndef NRF_SDH_CLOCK_LF_RC_TEMP_CTIV
-#define NRF_SDH_CLOCK_LF_RC_TEMP_CTIV 0
+#define NRF_SDH_CLOCK_LF_RC_TEMP_CTIV 2
 #endif
 
 // <o> NRF_SDH_CLOCK_LF_ACCURACY  - External clock accuracy used in the LL to compute timing.

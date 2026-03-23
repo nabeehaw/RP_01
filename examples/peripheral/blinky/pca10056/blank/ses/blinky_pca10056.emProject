@@ -50,12 +50,15 @@
     <folder Name="Application">
       <file file_name="ads1292r.c" />
       <file file_name="ads1292r.h" />
+      <file file_name="battery.h" />
       <file file_name="dsp.c" />
       <file file_name="dsp.h" />
       <file file_name="emg_acquisition.c" />
       <file file_name="emg_acquisition.h" />
       <file file_name="emg_buffer.c" />
       <file file_name="emg_buffer.h" />
+      <file file_name="emg_packet.c" />
+      <file file_name="emg_packet.h" />
       <file file_name="emg_types.h" />
       <file file_name="main.c" />
       <file file_name="platform.c" />
