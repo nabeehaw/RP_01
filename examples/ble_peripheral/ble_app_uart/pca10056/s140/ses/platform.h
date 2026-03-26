@@ -26,6 +26,11 @@ void platform_led_set(bool on);
 // separate helpers for chip select.
 void platform_spi_transfer(const uint8_t *tx, uint8_t *rx, size_t len);
 
+void platform_ads1292r_reset_low(void);
+void platform_ads1292r_reset_high(void);
+void platform_ads1292r_start_low(void);
+void platform_ads1292r_start_high(void);
+
 // Control ADS1292R chip-select line.
 void platform_ads1292r_cs_low(void);
 void platform_ads1292r_cs_high(void);

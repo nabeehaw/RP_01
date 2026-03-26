@@ -5,7 +5,7 @@
 #include "emg_types.h"
 #include "emg_buffer.h"
 
-// Global EMG buffer instance (defined in emg_acquisition.c)
+// Global EMG buffer instance 
 extern emg_buffer_t g_emg_buffer;
 
 // Initialise EMG acquisition: buffer + ADS1292R config.

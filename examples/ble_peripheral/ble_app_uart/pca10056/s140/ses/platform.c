@@ -75,7 +75,7 @@ void platform_init(void)
     spi_cfg.mosi_pin     = PIN_SPI_MOSI;
     spi_cfg.miso_pin     = PIN_SPI_MISO;
     spi_cfg.ss_pin       = NRFX_SPIM_PIN_NOT_USED; // we drive CS manually
-    spi_cfg.frequency    = NRF_SPIM_FREQ_1M;       // 1 MHz is plenty for ADS1292R
+    spi_cfg.frequency    = NRF_SPIM_FREQ_250K;   // 250K is plenty ADS1292R
     spi_cfg.mode         = NRF_SPIM_MODE_1;        // CPOL = 0, CPHA = 1 per datasheet
     spi_cfg.bit_order    = NRF_SPIM_BIT_ORDER_MSB_FIRST;
 
@@ -92,11 +92,14 @@ void platform_delay_ms(uint32_t ms)
 
 void platform_log(const char *fmt, ...)
 {
+    char buffer[128];
     va_list args;
+
     va_start(args, fmt);
-    // SEGGER_RTT_vprintf takes a pointer to va_list
-    SEGGER_RTT_printf(0, fmt, &args);
+    vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
+
+    SEGGER_RTT_WriteString(0, buffer);
 }
 
 void platform_led_set(bool on)
@@ -158,4 +161,24 @@ bool platform_ads1292r_drdy_is_low(void)
 {
     // DRDY is active low. Return true when a new conversion is ready.
     return (nrf_gpio_pin_read(PIN_ADS1292R_DRDY) == 0u);
+}
+
+void platform_ads1292r_reset_low(void)
+{
+    nrf_gpio_pin_clear(PIN_ADS1292R_RESET);
+}
+
+void platform_ads1292r_reset_high(void)
+{
+    nrf_gpio_pin_set(PIN_ADS1292R_RESET);
+}
+
+void platform_ads1292r_start_low(void)
+{
+    nrf_gpio_pin_clear(PIN_ADS1292R_START);
+}
+
+void platform_ads1292r_start_high(void)
+{
+    nrf_gpio_pin_set(PIN_ADS1292R_START);
 }
