@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
+#include <math.h>
 
 /* ---- Nordic SDK ---- */
 #include "nordic_common.h"
@@ -74,10 +75,6 @@
  * Set to 0 for production / BLE-only operation.
  * ==================================================================== */
 #define DIAGNOSTIC_LOG_ENABLED   1
-
-/* Number of valid frames to collect during the RESTING baseline phase.
- * 40 frames × 250 ms = 10 seconds of resting data.                   */
-#define DIAG_REST_FRAMES         40u
 
 /* ====================================================================
  * BLE configuration
@@ -136,9 +133,20 @@ static ble_uuid_t m_adv_uuids[] =
 };
 
 /* ====================================================================
- * Diagnostic statistics (resting baseline accumulator)
+ * Diagnostic statistics — cycling 40-frame phases
+ *
+ * Phase sequence (each 40 frames = 10 seconds):
+ *   Phase 0: REST 1     "Rest your arm"
+ *   Phase 1: FLEX 1     "Flex now"
+ *   Phase 2: REST 2     "Relax again"
+ *   Phase 3: FLEX 2     "Flex again"
+ *   Phase 4+: FREE      continuous, no prompts
+ *
+ * A summary is printed at the end of every 40-frame block.
  * ==================================================================== */
 #if DIAGNOSTIC_LOG_ENABLED
+
+#define DIAG_PHASE_LEN   40u   /* frames per phase */
 
 typedef struct
 {
@@ -148,10 +156,8 @@ typedef struct
     uint32_t count;
 } diag_stat_t;
 
-static diag_stat_t m_rest_rms1, m_rest_rms2;
-static diag_stat_t m_rest_mdf1, m_rest_mdf2;
-static diag_stat_t m_rest_mpf1, m_rest_mpf2;
-static bool        m_rest_summary_printed = false;
+static diag_stat_t m_stat_rms1, m_stat_rms2;
+static diag_stat_t m_stat_mdf1, m_stat_mdf2;
 
 static void diag_stat_reset(diag_stat_t *s)
 {
@@ -169,34 +175,73 @@ static void diag_stat_add(diag_stat_t *s, float v)
     s->count++;
 }
 
-static int32_t diag_stat_avg_int(const diag_stat_t *s)
+static int32_t diag_avg(const diag_stat_t *s)
 {
     if (s->count == 0) return 0;
     return (int32_t)(s->sum / (float)s->count + 0.5f);
 }
 
-static void diag_reset_all(void)
+static int32_t diag_min_i(const diag_stat_t *s)
 {
-    diag_stat_reset(&m_rest_rms1);
-    diag_stat_reset(&m_rest_rms2);
-    diag_stat_reset(&m_rest_mdf1);
-    diag_stat_reset(&m_rest_mdf2);
-    diag_stat_reset(&m_rest_mpf1);
-    diag_stat_reset(&m_rest_mpf2);
-    m_rest_summary_printed = false;
+    if (s->count == 0) return 0;
+    return (int32_t)(s->min + 0.5f);
 }
 
-static void diag_print_resting_summary(void)
+static int32_t diag_max_i(const diag_stat_t *s)
 {
-    platform_delay_ms(100); /* let RTT drain */
-    platform_log("\r\n-- REST SUMMARY --\r\n");
-    platform_log("CH1 RMS avg=%ld uV MDF=%ld Hz\r\n",
-                 (long)diag_stat_avg_int(&m_rest_rms1),
-                 (long)diag_stat_avg_int(&m_rest_mdf1));
-    platform_log("CH2 RMS avg=%ld uV MDF=%ld Hz\r\n",
-                 (long)diag_stat_avg_int(&m_rest_rms2),
-                 (long)diag_stat_avg_int(&m_rest_mdf2));
-    platform_log(">> NOW FLEX <<\r\n\r\n");
+    if (s->count == 0) return 0;
+    return (int32_t)(s->max + 0.5f);
+}
+
+static void diag_reset_stats(void)
+{
+    diag_stat_reset(&m_stat_rms1);
+    diag_stat_reset(&m_stat_rms2);
+    diag_stat_reset(&m_stat_mdf1);
+    diag_stat_reset(&m_stat_mdf2);
+}
+
+static const char * diag_phase_name(uint32_t phase)
+{
+    switch (phase)
+    {
+        case 0: return "REST1 ";
+        case 1: return "FLEX1 ";
+        case 2: return "REST2 ";
+        case 3: return "FLEX2 ";
+        default: return "FREE  ";
+    }
+}
+
+static void diag_print_phase_summary(uint32_t phase)
+{
+    platform_delay_ms(50);
+    const char *name = diag_phase_name(phase);
+    uint32_t clean = m_stat_rms1.count;
+    uint32_t spikes = DIAG_PHASE_LEN - clean;
+
+    platform_log("\r\n-- %s SUMMARY (%lu clean, %lu spikes rejected) --\r\n",
+                 name, (unsigned long)clean, (unsigned long)spikes);
+    platform_log("CH1 RMS avg=%ld min=%ld max=%ld uV  MDF avg=%ld Hz\r\n",
+                 (long)diag_avg(&m_stat_rms1),
+                 (long)diag_min_i(&m_stat_rms1),
+                 (long)diag_max_i(&m_stat_rms1),
+                 (long)diag_avg(&m_stat_mdf1));
+    platform_log("CH2 RMS avg=%ld min=%ld max=%ld uV  MDF avg=%ld Hz\r\n",
+                 (long)diag_avg(&m_stat_rms2),
+                 (long)diag_min_i(&m_stat_rms2),
+                 (long)diag_max_i(&m_stat_rms2),
+                 (long)diag_avg(&m_stat_mdf2));
+
+    /* Prompt for next phase */
+    switch (phase)
+    {
+        case 0: platform_log(">> FLEX your muscle NOW <<\r\n\r\n"); break;
+        case 1: platform_log(">> RELAX your muscle NOW <<\r\n\r\n"); break;
+        case 2: platform_log(">> FLEX again NOW <<\r\n\r\n"); break;
+        case 3: platform_log(">> Test complete. Free run. <<\r\n\r\n"); break;
+        default: platform_log("\r\n"); break;
+    }
 }
 
 #endif /* DIAGNOSTIC_LOG_ENABLED */
@@ -218,20 +263,28 @@ static void advertising_start(void);
 
 /* ====================================================================
  * LED timer callback (100 ms)
+ *
+ * Priority: FAULT > CHARGING > LOW_BATT > HEARTBEAT
+ * Also logs LED mode + CHG pin state every 5 seconds for debugging.
  * ==================================================================== */
 static void led_timer_handler(void *p_context)
 {
     (void)p_context;
+    static uint16_t s_led_log_cnt = 0;
+
+    /* Read CHG_STAT pin directly */
+    bool charging = battery_is_charging();
+    bool low      = battery_is_low();
 
     if (!m_emg_init_ok)
     {
         led_status_set_mode(LED_MODE_FAULT);
     }
-    else if (battery_is_charging())
+    else if (charging)
     {
         led_status_set_mode(LED_MODE_CHARGING);
     }
-    else if (battery_is_low())
+    else if (low)
     {
         led_status_set_mode(LED_MODE_LOW_BATT);
     }
@@ -241,6 +294,26 @@ static void led_timer_handler(void *p_context)
     }
 
     led_status_tick_100ms();
+
+    /* Log LED state every 5 seconds (50 ticks × 100 ms) */
+    s_led_log_cnt++;
+    if (s_led_log_cnt >= 50u)
+    {
+        s_led_log_cnt = 0;
+        const char *mode_str;
+        switch (led_status_get_mode())
+        {
+            case LED_MODE_HEARTBEAT: mode_str = "HEARTBEAT"; break;
+            case LED_MODE_LOW_BATT:  mode_str = "LOW_BATT";  break;
+            case LED_MODE_CHARGING:  mode_str = "CHARGING";  break;
+            case LED_MODE_FAULT:     mode_str = "FAULT";     break;
+            default:                 mode_str = "OFF";       break;
+        }
+        platform_log("[LED] mode=%s chg_pin=%u batt_low=%u\r\n",
+                     mode_str,
+                     (unsigned)charging,
+                     (unsigned)low);
+    }
 }
 
 /* ====================================================================
@@ -309,44 +382,60 @@ static void emg_task(void)
                 flags |= EMG_FLAG_FAULT;
             }
 
-            /* ---- Diagnostic logging ---- */
+            /* ---- Diagnostic logging (cycling phases) ---- */
 #if DIAGNOSTIC_LOG_ENABLED
             {
-                const char *phase;
+                /* Frame index within current phase (0-based) */
+                uint32_t phase_frame = ((m_emg_frame_counter - 1u) % DIAG_PHASE_LEN);
+                uint32_t phase_num   = ((m_emg_frame_counter - 1u) / DIAG_PHASE_LEN);
 
-                if (m_emg_frame_counter <= DIAG_REST_FRAMES)
+                /* Reset stats at the start of each new phase */
+                if (phase_frame == 0u)
                 {
-                    /* RESTING phase: accumulate statistics */
-                    phase = "REST  ";
+                    diag_reset_stats();
 
-                    diag_stat_add(&m_rest_rms1, feat1.rms_uV);
-                    diag_stat_add(&m_rest_rms2, feat2.rms_uV);
-                    diag_stat_add(&m_rest_mdf1, feat1.mdf_Hz);
-                    diag_stat_add(&m_rest_mdf2, feat2.mdf_Hz);
-                    diag_stat_add(&m_rest_mpf1, feat1.mpf_Hz);
-                    diag_stat_add(&m_rest_mpf2, feat2.mpf_Hz);
-                }
-                else
-                {
-                    /* ACTIVE phase */
-                    phase = "ACTIVE";
-
-                    /* Print resting summary once */
-                    if (!m_rest_summary_printed)
-                    {
-                        m_rest_summary_printed = true;
-                        diag_print_resting_summary();
-                    }
+                    /* Print phase header */
+                    const char *name = diag_phase_name(phase_num);
+                    platform_delay_ms(50);
+                    platform_log("--- %s START (frames %lu-%lu) ---\r\n",
+                        name,
+                        (unsigned long)m_emg_frame_counter,
+                        (unsigned long)(m_emg_frame_counter + DIAG_PHASE_LEN - 1u));
                 }
 
-                /* Per-frame log (compact) */
-                platform_log("%s F%lu | R1=%ld R2=%ld | M1=%ld M2=%ld\r\n",
-                    phase,
+                /* Spike detection: reject frames where either channel
+                 * exceeds 2000 µV — these are hardware glitches (BLE TX
+                 * coupling, CH2 rail clipping, SPI framing errors).
+                 * Still log them, but mark with * and exclude from stats. */
+                #define SPIKE_THRESHOLD_UV  2000.0f
+
+                bool is_spike = (feat1.rms_uV > SPIKE_THRESHOLD_UV) ||
+                                (feat2.rms_uV > SPIKE_THRESHOLD_UV);
+
+                if (!is_spike)
+                {
+                    /* Clean frame — include in statistics */
+                    diag_stat_add(&m_stat_rms1, feat1.rms_uV);
+                    diag_stat_add(&m_stat_rms2, feat2.rms_uV);
+                    diag_stat_add(&m_stat_mdf1, feat1.mdf_Hz);
+                    diag_stat_add(&m_stat_mdf2, feat2.mdf_Hz);
+                }
+
+                /* Per-frame log: * prefix = spike (excluded from avg) */
+                platform_log("%s%s F%lu | R1=%ld R2=%ld | M1=%ld M2=%ld\r\n",
+                    is_spike ? "*" : " ",
+                    diag_phase_name(phase_num),
                     (unsigned long)m_emg_frame_counter,
                     (long)(int32_t)(feat1.rms_uV + 0.5f),
                     (long)(int32_t)(feat2.rms_uV + 0.5f),
                     (long)(int32_t)(feat1.mdf_Hz + 0.5f),
                     (long)(int32_t)(feat2.mdf_Hz + 0.5f));
+
+                /* Print summary at end of phase */
+                if (phase_frame == (DIAG_PHASE_LEN - 1u))
+                {
+                    diag_print_phase_summary(phase_num);
+                }
             }
 #endif /* DIAGNOSTIC_LOG_ENABLED */
 
@@ -361,6 +450,15 @@ static void emg_task(void)
                                                  (uint8_t *)&pkt,
                                                  &len,
                                                  m_conn_handle);
+
+                /* Log first successful send so team can confirm data flows */
+                static bool s_first_send_logged = false;
+                if (err == NRF_SUCCESS && !s_first_send_logged)
+                {
+                    s_first_send_logged = true;
+                    platform_log("[BLE] First packet sent (%u B)\r\n",
+                                 (unsigned)sizeof(pkt));
+                }
 
                 if ((err != NRF_SUCCESS)          &&
                     (err != NRF_ERROR_RESOURCES)   &&
@@ -402,6 +500,12 @@ int main(void)
     battery_init();
     led_status_init();
 
+    /* Immediately report battery + charging pin state */
+    platform_log("Batt: %u mV | CHG pin=%u (%s)\r\n",
+                 battery_read_mv(),
+                 (unsigned)battery_is_charging(),
+                 battery_is_charging() ? "CHARGING" : "NOT CHARGING");
+
     /* ---- DSP channels (60 Hz notch enabled) ---- */
     dsp_channel_init(&m_dsp_ch1, true);
     dsp_channel_init(&m_dsp_ch2, true);
@@ -421,7 +525,7 @@ int main(void)
     }
 
 #if DIAGNOSTIC_LOG_ENABLED
-    diag_reset_all();
+    diag_reset_stats();
 
     /* Let RTT drain the boot messages before printing more */
     platform_delay_ms(200);
@@ -430,7 +534,300 @@ int main(void)
     platform_log("Batt: %u mV | Pkt: %u B\r\n",
                  battery_read_mv(),
                  (unsigned)sizeof(emg_packet_t));
-    platform_log("RELAX muscle for 10s...\r\n\r\n");
+
+    /* ============================================================
+     * RAW ADC DUMP — 40 samples, no filtering, no DSP
+     *
+     * This shows exactly what the ADS1292R pins see.
+     * CH1 = pins IN1P/IN1N (biceps differential pair)
+     * CH2 = pins IN2P/IN2N (triceps differential pair)
+     *
+     * Interpretation:
+     *   Code near 0      → inputs are shorted or balanced
+     *   Code ±1000-50000 → electrode offset + noise (normal)
+     *   Code stuck at exactly same value → SPI problem or input floating
+     *   Code changes when you touch → ADC input path works
+     *   Code doesn't change → wire/solder/pin issue
+     *
+     * Values in µV (code × 0.048 µV/count, Gain=6)
+     * ============================================================ */
+    if (m_emg_init_ok)
+    {
+        platform_log("\r\n--- RAW ADC TEST (40 samples) ---\r\n");
+        platform_log("Touch/short electrodes to see changes\r\n");
+        platform_log("  #  |   CH1 raw   |   CH2 raw   | CH1 uV | CH2 uV\r\n");
+
+        /* Wait a moment for any transient to pass */
+        platform_delay_ms(100);
+
+        for (uint8_t i = 0; i < 40; i++)
+        {
+            /* Wait for DRDY (timeout after ~10 ms) */
+            uint32_t timeout = 20000u;
+            while (!platform_ads1292r_drdy_is_low() && timeout > 0)
+            {
+                timeout--;
+            }
+
+            if (timeout == 0)
+            {
+                platform_log("  %2u | DRDY TIMEOUT\r\n", i);
+                continue;
+            }
+
+            emg_sample_t raw;
+            if (ads1292r_read_sample(&raw))
+            {
+                /* Convert to µV for human readability */
+                int32_t ch1_uv = (int32_t)((float)raw.ch1 * 0.048f);
+                int32_t ch2_uv = (int32_t)((float)raw.ch2 * 0.048f);
+
+                platform_log("  %2u | %10ld | %10ld | %6ld | %6ld\r\n",
+                             i,
+                             (long)raw.ch1,
+                             (long)raw.ch2,
+                             (long)ch1_uv,
+                             (long)ch2_uv);
+            }
+            else
+            {
+                platform_log("  %2u | READ FAIL\r\n", i);
+            }
+
+            /* Small delay so RTT can keep up */
+            platform_delay_ms(10);
+        }
+
+        platform_log("--- END RAW ADC TEST ---\r\n\r\n");
+        platform_delay_ms(100);
+    }
+
+    /* ============================================================
+     * SYNTHETIC SIGNAL TEST — verify filters, RMS, MDF, MPF
+     *
+     * Uses a temporary DSP channel fed with known sine waves.
+     * No hardware involved — pure math validation.
+     *
+     * For each test:
+     *   1. Init a fresh DSP channel
+     *   2. Feed (settle + 1 window) = 8×500 + 500 = 4500 samples
+     *   3. Print expected vs actual
+     * ============================================================ */
+    {
+        platform_log("--- SYNTHETIC FILTER TEST ---\r\n");
+        platform_delay_ms(50);
+
+        /* We'll run 5 tests.  For each, allocate a temp DSP channel
+         * on the stack (it's ~2 KB but we have plenty). */
+        dsp_channel_t  test_ch;
+        dsp_features_t test_feat;
+
+        /* Number of samples: settle windows + 1 real window */
+        const uint16_t total_samples =
+            (DSP_SETTLE_WINDOWS + 1u) * DSP_WINDOW_SAMPLES;
+
+        /* ---- Test 1: 100 Hz pure sine, 10000 counts peak ----
+         * Expected after HP(20)+LP(450)+notch(60):
+         *   100 Hz is in passband → passes through
+         *   RMS = 10000/sqrt(2) × 0.048 = ~339 µV
+         *   MDF ≈ 100 Hz,  MPF ≈ 100 Hz                        */
+        {
+            dsp_channel_init(&test_ch, true);
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                float t = (float)n / DSP_FS_HZ;
+                int32_t code = (int32_t)(10000.0f
+                    * sinf(2.0f * 3.14159265f * 100.0f * t));
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T1: 100Hz sine 10000pk\r\n");
+                platform_log("  Expected: RMS~339uV MDF~100Hz MPF~100Hz\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            else
+            {
+                platform_log("T1: NO OUTPUT (settling issue)\r\n");
+            }
+            platform_delay_ms(50);
+        }
+
+        /* ---- Test 2: 60 Hz pure sine, 10000 counts peak ----
+         * Expected: notch at 60 Hz should kill this.
+         *   RMS ≈ very low (< 20 µV)
+         *   MDF/MPF meaningless when signal ≈ 0                 */
+        {
+            dsp_channel_init(&test_ch, true);  /* notch ON */
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                float t = (float)n / DSP_FS_HZ;
+                int32_t code = (int32_t)(10000.0f
+                    * sinf(2.0f * 3.14159265f * 60.0f * t));
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T2: 60Hz sine 10000pk (notch ON)\r\n");
+                platform_log("  Expected: RMS<20uV (notch kills 60Hz)\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            platform_delay_ms(50);
+        }
+
+        /* ---- Test 3: 60 Hz sine with notch OFF ----
+         * Expected: 60 Hz passes through (HP at 20 Hz, LP at 450 Hz)
+         *   RMS ≈ 339 µV (same as test 1)
+         *   MDF ≈ 60 Hz,  MPF ≈ 60 Hz                          */
+        {
+            dsp_channel_init(&test_ch, false);  /* notch OFF */
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                float t = (float)n / DSP_FS_HZ;
+                int32_t code = (int32_t)(10000.0f
+                    * sinf(2.0f * 3.14159265f * 60.0f * t));
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T3: 60Hz sine 10000pk (notch OFF)\r\n");
+                platform_log("  Expected: RMS~339uV MDF~60Hz MPF~60Hz\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            platform_delay_ms(50);
+        }
+
+        /* ---- Test 4: 10 Hz sine (below HP cutoff) ----
+         * Expected: 20 Hz high-pass should block this
+         *   RMS ≈ very low (< 30 µV)                            */
+        {
+            dsp_channel_init(&test_ch, true);
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                float t = (float)n / DSP_FS_HZ;
+                int32_t code = (int32_t)(10000.0f
+                    * sinf(2.0f * 3.14159265f * 10.0f * t));
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T4: 10Hz sine 10000pk (below HP)\r\n");
+                platform_log("  Expected: RMS<30uV (HP blocks 10Hz)\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            platform_delay_ms(50);
+        }
+
+        /* ---- Test 5: Two-tone 80 Hz + 200 Hz, equal amplitude ----
+         * Expected:
+         *   Both in passband
+         *   MDF ≈ between 80 and 200 (closer to geometric mean)
+         *   MPF ≈ (80 + 200) / 2 = 140 Hz for equal power       */
+        {
+            dsp_channel_init(&test_ch, true);
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                float t = (float)n / DSP_FS_HZ;
+                int32_t code = (int32_t)(
+                    5000.0f * sinf(2.0f * 3.14159265f * 80.0f * t) +
+                    5000.0f * sinf(2.0f * 3.14159265f * 200.0f * t));
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T5: 80Hz+200Hz equal 5000pk each\r\n");
+                platform_log("  Expected: MDF~120-140Hz MPF~140Hz\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            platform_delay_ms(50);
+        }
+
+        /* ---- Test 6: DC offset (constant value) ----
+         * Expected: HP filter blocks DC completely
+         *   RMS ≈ 0 µV                                          */
+        {
+            dsp_channel_init(&test_ch, true);
+            bool got_result = false;
+
+            for (uint16_t n = 0; n < total_samples; n++)
+            {
+                int32_t code = 100000;  /* large DC offset */
+
+                if (dsp_process_sample(&test_ch, code, &test_feat))
+                {
+                    got_result = true;
+                }
+            }
+
+            if (got_result)
+            {
+                platform_log("T6: DC offset 100000 counts\r\n");
+                platform_log("  Expected: RMS~0uV (HP blocks DC)\r\n");
+                platform_log("  Got:      RMS=%ld   MDF=%ld   MPF=%ld\r\n",
+                    (long)(int32_t)(test_feat.rms_uV + 0.5f),
+                    (long)(int32_t)(test_feat.mdf_Hz + 0.5f),
+                    (long)(int32_t)(test_feat.mpf_Hz + 0.5f));
+            }
+            platform_delay_ms(50);
+        }
+
+        platform_log("--- END SYNTHETIC TEST ---\r\n\r\n");
+        platform_delay_ms(100);
+    }
+
+    platform_log("Phases: 40 frames (10s) each\r\n");
+    platform_log("REST1 -> FLEX1 -> REST2 -> FLEX2 -> FREE\r\n");
+    platform_log("RELAX muscle for first 10s...\r\n\r\n");
 #endif
 
     /* ---- Timers ---- */
@@ -489,7 +886,7 @@ int main(void)
 }
 
 /* ====================================================================
- * BLE boilerplate (unchanged)
+ * BLE boilerplate 
  * ==================================================================== */
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t *p_file_name)
@@ -617,6 +1014,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
     {
         case BLE_GAP_EVT_CONNECTED:
             NRF_LOG_INFO("Connected");
+            platform_log("[BLE] CONNECTED\r\n");
             m_conn_handle = p_ble_evt->evt.gap_evt.conn_handle;
             err_code = nrf_ble_qwr_conn_handle_assign(&m_qwr, m_conn_handle);
             APP_ERROR_CHECK(err_code);
@@ -624,6 +1022,7 @@ static void ble_evt_handler(ble_evt_t const *p_ble_evt, void *p_context)
 
         case BLE_GAP_EVT_DISCONNECTED:
             NRF_LOG_INFO("Disconnected");
+            platform_log("[BLE] DISCONNECTED\r\n");
             m_conn_handle = BLE_CONN_HANDLE_INVALID;
             break;
 
@@ -770,6 +1169,13 @@ static void advertising_start(void)
 {
     uint32_t err_code =
         ble_advertising_start(&m_advertising, BLE_ADV_MODE_FAST);
-    /* Non-fatal — EMG test continues without BLE */
-    (void)err_code;
+    if (err_code == NRF_SUCCESS)
+    {
+        platform_log("[BLE] Advertising as '%s'\r\n", DEVICE_NAME);
+    }
+    else
+    {
+        platform_log("[BLE] Adv FAILED err=%lu (EMG still runs)\r\n",
+                     (unsigned long)err_code);
+    }
 }
