@@ -292,6 +292,7 @@ void dsp_channel_init(dsp_channel_t *ch, bool notch_enable)
     biquad_init(&ch->hp,    HP_B0,    HP_B1,    HP_B2,    HP_A1,    HP_A2);
     biquad_init(&ch->lp,    LP_B0,    LP_B1,    LP_B2,    LP_A1,    LP_A2);
     biquad_init(&ch->notch, NOTCH_B0, NOTCH_B1, NOTCH_B2, NOTCH_A1, NOTCH_A2);
+    biquad_init(&ch->notch2, NOTCH_B0, NOTCH_B1, NOTCH_B2, NOTCH_A1, NOTCH_A2);
 
     ch->notch_enabled = notch_enable;
     ch->win_index     = 0u;
@@ -313,6 +314,7 @@ void dsp_channel_reset(dsp_channel_t *ch)
     biquad_reset(&ch->hp);
     biquad_reset(&ch->lp);
     biquad_reset(&ch->notch);
+    biquad_reset(&ch->notch2);
 
     ch->win_index    = 0u;
     ch->settle_count = 0u;
@@ -340,12 +342,15 @@ bool dsp_process_sample(dsp_channel_t *ch,
     /* Convert 24-bit signed code to float (stays in ADC counts) */
     float x = (float)raw_code;
 
-    /* Filter chain: HP → LP → (optional) notch */
+    /* Filter chain: HP → LP → (optional) notch × 2
+     * Cascading two identical notch stages gives ~80 dB rejection
+     * at 60 Hz instead of ~40 dB from a single stage.            */
     float y = biquad_process(&ch->hp, x);
     y       = biquad_process(&ch->lp, y);
     if (ch->notch_enabled)
     {
         y = biquad_process(&ch->notch, y);
+        y = biquad_process(&ch->notch2, y);
     }
 
     /* Store into current window */

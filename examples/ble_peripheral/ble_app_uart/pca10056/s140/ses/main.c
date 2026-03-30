@@ -382,6 +382,19 @@ static void emg_task(void)
                 flags |= EMG_FLAG_FAULT;
             }
 
+            /* ---- Spike detection (always active, not just diagnostic) ----
+             * Skip frames where:
+             *   - Either channel RMS exceeds 1500 µV (hardware glitch)
+             *   - Either channel MDF > 180 Hz (impossible for real EMG,
+             *     indicates CH2 rail clipping or SPI framing error)     */
+            #define SPIKE_RMS_THRESH_UV  1500.0f
+            #define SPIKE_MDF_THRESH_HZ  180.0f
+
+            bool is_spike = (feat1.rms_uV > SPIKE_RMS_THRESH_UV) ||
+                            (feat2.rms_uV > SPIKE_RMS_THRESH_UV) ||
+                            (feat1.mdf_Hz > SPIKE_MDF_THRESH_HZ) ||
+                            (feat2.mdf_Hz > SPIKE_MDF_THRESH_HZ);
+
             /* ---- Diagnostic logging (cycling phases) ---- */
 #if DIAGNOSTIC_LOG_ENABLED
             {
@@ -403,15 +416,6 @@ static void emg_task(void)
                         (unsigned long)(m_emg_frame_counter + DIAG_PHASE_LEN - 1u));
                 }
 
-                /* Spike detection: reject frames where either channel
-                 * exceeds 2000 µV — these are hardware glitches (BLE TX
-                 * coupling, CH2 rail clipping, SPI framing errors).
-                 * Still log them, but mark with * and exclude from stats. */
-                #define SPIKE_THRESHOLD_UV  2000.0f
-
-                bool is_spike = (feat1.rms_uV > SPIKE_THRESHOLD_UV) ||
-                                (feat2.rms_uV > SPIKE_THRESHOLD_UV);
-
                 if (!is_spike)
                 {
                     /* Clean frame — include in statistics */
@@ -421,7 +425,7 @@ static void emg_task(void)
                     diag_stat_add(&m_stat_mdf2, feat2.mdf_Hz);
                 }
 
-                /* Per-frame log: * prefix = spike (excluded from avg) */
+                /* Per-frame log: * prefix = spike (excluded from avg + BLE) */
                 platform_log("%s%s F%lu | R1=%ld R2=%ld | M1=%ld M2=%ld\r\n",
                     is_spike ? "*" : " ",
                     diag_phase_name(phase_num),
@@ -439,12 +443,12 @@ static void emg_task(void)
             }
 #endif /* DIAGNOSTIC_LOG_ENABLED */
 
-            /* ---- Build and send BLE packet ---- */
-            emg_packet_t pkt;
-            emg_build_packet(&feat1, &feat2, ts_ms, flags, &pkt);
-
-            if (m_conn_handle != BLE_CONN_HANDLE_INVALID)
+            /* ---- Build and send BLE packet (skip spikes) ---- */
+            if (!is_spike && m_conn_handle != BLE_CONN_HANDLE_INVALID)
             {
+                emg_packet_t pkt;
+                emg_build_packet(&feat1, &feat2, ts_ms, flags, &pkt);
+
                 uint16_t len = sizeof(pkt);
                 uint32_t err = ble_nus_data_send(&m_nus,
                                                  (uint8_t *)&pkt,
@@ -536,69 +540,181 @@ int main(void)
                  (unsigned)sizeof(emg_packet_t));
 
     /* ============================================================
-     * RAW ADC DUMP — 40 samples, no filtering, no DSP
+     * SPI FRAME PROBE — REST vs FLEX comparison
      *
-     * This shows exactly what the ADS1292R pins see.
-     * CH1 = pins IN1P/IN1N (biceps differential pair)
-     * CH2 = pins IN2P/IN2N (triceps differential pair)
+     * Pass 1: 100 samples while RELAXED (collect baseline)
+     * Wait:   10 seconds (you flex during this)
+     * Pass 2: 100 samples while FLEXED (collect active)
+     * Compare: if range increases 3× or more, electrodes work
      *
-     * Interpretation:
-     *   Code near 0      → inputs are shorted or balanced
-     *   Code ±1000-50000 → electrode offset + noise (normal)
-     *   Code stuck at exactly same value → SPI problem or input floating
-     *   Code changes when you touch → ADC input path works
-     *   Code doesn't change → wire/solder/pin issue
-     *
-     * Values in µV (code × 0.048 µV/count, Gain=6)
+     * All values are RAW — no DSP filtering applied.
      * ============================================================ */
     if (m_emg_init_ok)
     {
-        platform_log("\r\n--- RAW ADC TEST (40 samples) ---\r\n");
-        platform_log("Touch/short electrodes to see changes\r\n");
-        platform_log("  #  |   CH1 raw   |   CH2 raw   | CH1 uV | CH2 uV\r\n");
-
-        /* Wait a moment for any transient to pass */
+        platform_log("\r\n--- SPI PROBE: REST vs FLEX ---\r\n");
         platform_delay_ms(100);
 
-        for (uint8_t i = 0; i < 40; i++)
+        /* Hex dump first 5 frames for alignment check */
+        platform_log("Frame alignment check:\r\n");
+        for (uint8_t i = 0; i < 5; i++)
         {
-            /* Wait for DRDY (timeout after ~10 ms) */
             uint32_t timeout = 20000u;
-            while (!platform_ads1292r_drdy_is_low() && timeout > 0)
-            {
-                timeout--;
-            }
+            while (!platform_ads1292r_drdy_is_low() && timeout > 0) timeout--;
+            if (timeout == 0) continue;
 
-            if (timeout == 0)
+            uint8_t frame[9];
+            if (ads1292r_read_raw_frame(frame))
             {
-                platform_log("  %2u | DRDY TIMEOUT\r\n", i);
-                continue;
+                bool stat_ok = ((frame[0] & 0xF0) == 0xC0);
+                platform_log("  %u | %02X %02X %02X | %02X %02X %02X | %02X %02X %02X | %s\r\n",
+                    i, frame[0],frame[1],frame[2],
+                    frame[3],frame[4],frame[5],
+                    frame[6],frame[7],frame[8],
+                    stat_ok ? "OK" : "BAD");
             }
-
-            emg_sample_t raw;
-            if (ads1292r_read_sample(&raw))
-            {
-                /* Convert to µV for human readability */
-                int32_t ch1_uv = (int32_t)((float)raw.ch1 * 0.048f);
-                int32_t ch2_uv = (int32_t)((float)raw.ch2 * 0.048f);
-
-                platform_log("  %2u | %10ld | %10ld | %6ld | %6ld\r\n",
-                             i,
-                             (long)raw.ch1,
-                             (long)raw.ch2,
-                             (long)ch1_uv,
-                             (long)ch2_uv);
-            }
-            else
-            {
-                platform_log("  %2u | READ FAIL\r\n", i);
-            }
-
-            /* Small delay so RTT can keep up */
-            platform_delay_ms(10);
+            platform_delay_ms(5);
         }
 
-        platform_log("--- END RAW ADC TEST ---\r\n\r\n");
+        /* Helper: collect 100 raw samples and compute statistics */
+        /* We define the stats inline since we need to run it twice */
+        typedef struct {
+            int32_t min, max;
+            int64_t sum;
+            uint32_t count;
+        } probe_stat_t;
+
+        /* ---- PASS 1: RESTING ---- */
+        platform_delay_ms(50);
+        platform_log("\r\nPASS 1: RESTING (keep arm relaxed)...\r\n");
+        platform_delay_ms(500); /* brief settle */
+
+        probe_stat_t r1 = { .min=0x7FFFFFFF, .max=(int32_t)0x80000000, .sum=0, .count=0 };
+        probe_stat_t r2 = { .min=0x7FFFFFFF, .max=(int32_t)0x80000000, .sum=0, .count=0 };
+
+        for (uint16_t i = 0; i < 100; i++)
+        {
+            uint32_t timeout = 20000u;
+            while (!platform_ads1292r_drdy_is_low() && timeout > 0) timeout--;
+            if (timeout == 0) continue;
+
+            uint8_t frame[9];
+            if (!ads1292r_read_raw_frame(frame)) continue;
+
+            int32_t ch1 = ((int32_t)frame[3]<<16)|((int32_t)frame[4]<<8)|frame[5];
+            int32_t ch2 = ((int32_t)frame[6]<<16)|((int32_t)frame[7]<<8)|frame[8];
+            if (ch1 & 0x800000) ch1 |= (int32_t)0xFF000000;
+            if (ch2 & 0x800000) ch2 |= (int32_t)0xFF000000;
+
+            r1.sum += ch1; if (ch1 < r1.min) r1.min = ch1; if (ch1 > r1.max) r1.max = ch1; r1.count++;
+            r2.sum += ch2; if (ch2 < r2.min) r2.min = ch2; if (ch2 > r2.max) r2.max = ch2; r2.count++;
+        }
+
+        int32_t r1_range = r1.max - r1.min;
+        int32_t r2_range = r2.max - r2.min;
+        int32_t r1_uv = (int32_t)((float)r1_range * 0.048f);
+        int32_t r2_uv = (int32_t)((float)r2_range * 0.048f);
+
+        platform_log("REST CH1: avg=%ld range=%ld counts (%ld uV pp)\r\n",
+            (long)(int32_t)(r1.sum / (int64_t)r1.count), (long)r1_range, (long)r1_uv);
+        platform_log("REST CH2: avg=%ld range=%ld counts (%ld uV pp)\r\n",
+            (long)(int32_t)(r2.sum / (int64_t)r2.count), (long)r2_range, (long)r2_uv);
+
+        /* ---- WAIT: 10 seconds for user to flex ---- */
+        platform_log("\r\n>>> FLEX YOUR BICEPS NOW! Holding for 10 seconds... <<<\r\n");
+        platform_delay_ms(50);
+
+        /* Drain any samples during the wait so buffer doesn't overflow */
+        for (uint8_t sec = 10; sec > 0; sec--)
+        {
+            platform_log("  %u...\r\n", sec);
+            for (uint16_t t = 0; t < 100; t++)
+            {
+                platform_delay_ms(10);
+                /* drain DRDY samples during wait */
+                if (platform_ads1292r_drdy_is_low())
+                {
+                    uint8_t dump[9];
+                    ads1292r_read_raw_frame(dump);
+                }
+            }
+        }
+        platform_log("  Capturing FLEXED data now...\r\n");
+
+        /* ---- PASS 2: FLEXED ---- */
+        probe_stat_t f1 = { .min=0x7FFFFFFF, .max=(int32_t)0x80000000, .sum=0, .count=0 };
+        probe_stat_t f2 = { .min=0x7FFFFFFF, .max=(int32_t)0x80000000, .sum=0, .count=0 };
+
+        for (uint16_t i = 0; i < 100; i++)
+        {
+            uint32_t timeout = 20000u;
+            while (!platform_ads1292r_drdy_is_low() && timeout > 0) timeout--;
+            if (timeout == 0) continue;
+
+            uint8_t frame[9];
+            if (!ads1292r_read_raw_frame(frame)) continue;
+
+            int32_t ch1 = ((int32_t)frame[3]<<16)|((int32_t)frame[4]<<8)|frame[5];
+            int32_t ch2 = ((int32_t)frame[6]<<16)|((int32_t)frame[7]<<8)|frame[8];
+            if (ch1 & 0x800000) ch1 |= (int32_t)0xFF000000;
+            if (ch2 & 0x800000) ch2 |= (int32_t)0xFF000000;
+
+            f1.sum += ch1; if (ch1 < f1.min) f1.min = ch1; if (ch1 > f1.max) f1.max = ch1; f1.count++;
+            f2.sum += ch2; if (ch2 < f2.min) f2.min = ch2; if (ch2 > f2.max) f2.max = ch2; f2.count++;
+        }
+
+        int32_t f1_range = f1.max - f1.min;
+        int32_t f2_range = f2.max - f2.min;
+        int32_t f1_uv = (int32_t)((float)f1_range * 0.048f);
+        int32_t f2_uv = (int32_t)((float)f2_range * 0.048f);
+
+        platform_log("FLEX CH1: avg=%ld range=%ld counts (%ld uV pp)\r\n",
+            (long)(int32_t)(f1.sum / (int64_t)f1.count), (long)f1_range, (long)f1_uv);
+        platform_log("FLEX CH2: avg=%ld range=%ld counts (%ld uV pp)\r\n",
+            (long)(int32_t)(f2.sum / (int64_t)f2.count), (long)f2_range, (long)f2_uv);
+
+        /* ---- COMPARISON ---- */
+        platform_delay_ms(50);
+        platform_log("\r\n=== REST vs FLEX COMPARISON ===\r\n");
+        platform_log("  CH1: REST=%ld uV pp  FLEX=%ld uV pp", (long)r1_uv, (long)f1_uv);
+        if (r1_uv > 0)
+        {
+            uint32_t ratio_x10 = (uint32_t)((uint32_t)f1_uv * 10u / (uint32_t)r1_uv);
+            platform_log("  (x%lu.%lu)", (unsigned long)(ratio_x10 / 10u),
+                                          (unsigned long)(ratio_x10 % 10u));
+        }
+        platform_log("\r\n");
+
+        platform_log("  CH2: REST=%ld uV pp  FLEX=%ld uV pp", (long)r2_uv, (long)f2_uv);
+        if (r2_uv > 0)
+        {
+            uint32_t ratio_x10 = (uint32_t)((uint32_t)f2_uv * 10u / (uint32_t)r2_uv);
+            platform_log("  (x%lu.%lu)", (unsigned long)(ratio_x10 / 10u),
+                                          (unsigned long)(ratio_x10 % 10u));
+        }
+        platform_log("\r\n");
+
+        /* Verdict */
+        bool ch1_works = (f1_uv > r1_uv * 2);
+        bool ch2_works = (f2_uv > r2_uv * 2);
+
+        platform_log("\r\n  CH1: %s\r\n", ch1_works
+            ? "PASS — flex increased signal (electrodes working)"
+            : "FAIL — no change with flex (check electrode placement)");
+        platform_log("  CH2: %s\r\n", ch2_works
+            ? "PASS — flex increased signal (electrodes working)"
+            : "FAIL — no change with flex (check electrode placement)");
+
+        if (!ch1_works && !ch2_works)
+        {
+            platform_log("\r\n  Neither channel responds to flex.\r\n");
+            platform_log("  Possible causes:\r\n");
+            platform_log("  1. Electrodes too close together (<2 cm)\r\n");
+            platform_log("  2. Electrodes on tendon, not muscle belly\r\n");
+            platform_log("  3. Dry contact, need gel or wet skin\r\n");
+            platform_log("  4. Wires not reaching ADS1292R input pins\r\n");
+        }
+
+        platform_log("=== END PROBE ===\r\n\r\n");
         platform_delay_ms(100);
     }
 
@@ -886,7 +1002,7 @@ int main(void)
 }
 
 /* ====================================================================
- * BLE boilerplate 
+ * BLE boilerplate (unchanged)
  * ==================================================================== */
 
 void assert_nrf_callback(uint16_t line_num, const uint8_t *p_file_name)

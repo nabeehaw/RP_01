@@ -72,7 +72,8 @@ typedef struct
 {
     dsp_biquad_t hp;                              /* 20 Hz high-pass    */
     dsp_biquad_t lp;                              /* 450 Hz low-pass    */
-    dsp_biquad_t notch;                           /* 60 Hz notch        */
+    dsp_biquad_t notch;                           /* 60 Hz notch #1     */
+    dsp_biquad_t notch2;                          /* 60 Hz notch #2 (cascade for ~80 dB) */
     bool         notch_enabled;
 
     float        window[DSP_WINDOW_SAMPLES];      /* filtered samples   */

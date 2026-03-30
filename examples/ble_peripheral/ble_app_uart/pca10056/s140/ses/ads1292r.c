@@ -302,3 +302,19 @@ bool ads1292r_read_sample(emg_sample_t *out_sample)
 
     return true;
 }
+
+bool ads1292r_read_raw_frame(uint8_t *frame_out)
+{
+    uint8_t tx[ADS1292R_FRAME_LEN] = {0};
+
+    if (frame_out == NULL)
+    {
+        return false;
+    }
+
+    platform_ads1292r_cs_low();
+    platform_spi_transfer(tx, frame_out, ADS1292R_FRAME_LEN);
+    platform_ads1292r_cs_high();
+
+    return true;
+}

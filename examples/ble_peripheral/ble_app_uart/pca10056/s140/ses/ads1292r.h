@@ -62,4 +62,9 @@ bool ads1292r_stop_continuous(void);
 // Assumes DRDY is already low when called.
 bool ads1292r_read_sample(emg_sample_t *out_sample);
 
+// Read one raw 9-byte SPI frame WITHOUT parsing.
+// frame_out must point to a 9-byte buffer.
+// Returns the raw bytes exactly as clocked from the ADS1292R.
+bool ads1292r_read_raw_frame(uint8_t *frame_out);
+
 #endif // ADS1292R_H
