@@ -163,7 +163,7 @@ static void dsp_compute_spectral_features(const float *window,
      *    Frequency resolution = Fs / FFT_LEN = 2000 / 512 ≈ 3.906 Hz
      *    Bin k → freq = k × 3.906 Hz
      *
-     *    We restrict to the sEMG band: bins 6..115 (≈23–449 Hz).
+     *    Restrict to the sEMG band: bins 6..115 (≈23–449 Hz).
      *    Two passes:
      *      Pass 1: total power + weighted frequency sum (for MPF)
      *      Pass 2: cumulative power to find MDF                       */

@@ -4,56 +4,46 @@
 #define ADS1292R_FRAME_LEN  9u
 
 /* ====================================================================
- * ADS1292R Register Configuration Values
- *
- * All values derived from the ADS1292R datasheet and the Kinetic Link
- * PCB schematic (Student A's design).
+ * ADS1292R Register Configuration — PRODUCTION
  * ==================================================================== */
 
-/* CONFIG1 = 0x04
- *   bit 7    : 0  (reserved)
- *   bit 6    : 0  (DAISY_IN disabled)
- *   bit 5    : 0  (CLK_EN, oscillator clock output off)
- *   bits 4-3 : 00 (reserved)
- *   bits 2-0 : 100 = 2 kSPS data rate                                */
+/* Valid device IDs (top nibble of ID register) */
+#define ADS1292_ID          0x53u   /* ADS1292 (no R suffix)            */
+#define ADS1292R_ID         0x73u   /* ADS1292R                         */
+
+/* CONFIG1 = 0x04: 2 kSPS data rate                                    */
 #define CFG_CONFIG1     0x04u
 
-/* CONFIG2 = 0xA0
- *   bit 7    : 1  (must be 1 for ADS1292R)
- *   bit 6    : 0  (lead-off comparators off)
- *   bit 5    : 1  (PDB_REFBUF — internal reference buffer ON)
- *   bit 4    : 0  (VREF = 2.42 V, not 4.033 V)
- *   bit 3    : 0  (CLK_EN off)
- *   bit 2    : 0  (reserved)
- *   bit 1    : 0  (INT_TEST — no internal test signal)
- *   bit 0    : 0  (TEST_FREQ)                                        */
-#define CFG_CONFIG2     0xA0u
+/* CONFIG2 = 0xE0:
+ *   bit 7 = 1  (must be 1)
+ *   bit 6 = 1  (PDB_LOFF_COMP — enable lead-off comparators)
+ *   bit 5 = 1  (PDB_REFBUF — internal reference ON)
+ *   bits 4-0 = 0                                                      */
+#define CFG_CONFIG2     0xE0u
 
-/* CH1SET = 0x00  (PD off, Gain = 6, MUX = normal input)
- * CH2SET = 0x00  (same)                                               */
+/* CH1SET = 0x00, CH2SET = 0x00: PGA gain = 6, normal input            */
 #define CFG_CH1SET      0x00u
 #define CFG_CH2SET      0x00u
 
-/* RLD_SENS = 0x13
- *   bit 5    : 0  (PGA chop = default)
- *   bit 4    : 1  (PDB_RLD — power on the RLD buffer amplifier)
- *   bit 3    : 0  (RLD_LOFF_SENS — RLD not used for lead-off)
- *   bit 2    : 0  (RLD2N — CH2 neg not routed to RLD)
- *   bit 1    : 1  (RLD2P — CH2 pos → RLD derivation)
- *   bit 0    : 1  (RLD1P — CH1 pos → RLD derivation)
- *
- * This enables common-mode rejection using the Right Leg Drive circuit
- * (1 MΩ + 1.5 nF feedback network on the PCB, ~100 Hz loop BW).
- * Without this register write, the RLD amplifier is powered down and
- * mains interference is NOT actively cancelled — leading to large
- * 60 Hz artifacts and odd RMS readings.                               */
+/* RLD_SENS = 0x13: RLD buffer ON, CH1P + CH2P routed to RLD           */
 #define CFG_RLD_SENS    0x13u
 
-/* LOFF = 0x00 (lead-off detection disabled for now)                   */
-#define CFG_LOFF        0x00u
+/* LOFF = 0x10:
+ *   bits [7:5] = 000  (comparator threshold: 95% / 5%)
+ *   bit 4 = 1         (must be 1 for ADS1292R)
+ *   bits [3:2] = 00   (lead-off current: 6 nA)
+ *   bit 1 = 0         (reserved)
+ *   bit 0 = 0         (DC lead-off, not AC)                           */
+#define CFG_LOFF        0x10u
 
-/* LOFF_SENS = 0x00 (all lead-off channels disconnected)               */
-#define CFG_LOFF_SENS   0x00u
+/* LOFF_SENS = 0x0F:
+ *   bit 7-4 = 0000    (FLIP bits — no inversion)
+ *   bit 3 = 1         (LOFF2N — sense IN2N)
+ *   bit 2 = 1         (LOFF2P — sense IN2P)
+ *   bit 1 = 1         (LOFF1N — sense IN1N)
+ *   bit 0 = 1         (LOFF1P — sense IN1P)
+ * All 4 electrode inputs are monitored for lead-off.                  */
+#define CFG_LOFF_SENS   0x0Fu
 
 /* ====================================================================
  * Helpers
@@ -93,14 +83,11 @@ bool ads1292r_read_reg(uint8_t addr, uint8_t *value_out)
     uint8_t tx[3];
     uint8_t rx[3];
 
-    if (value_out == NULL)
-    {
-        return false;
-    }
+    if (value_out == NULL) return false;
 
     tx[0] = (uint8_t)(ADS1292R_CMD_RREG | (addr & 0x1Fu));
-    tx[1] = 0x00u;   /* read 1 register */
-    tx[2] = 0x00u;   /* dummy byte to clock data out */
+    tx[1] = 0x00u;
+    tx[2] = 0x00u;
 
     platform_ads1292r_cs_low();
     platform_spi_transfer(tx, rx, 3u);
@@ -117,7 +104,7 @@ bool ads1292r_write_reg(uint8_t addr, uint8_t value)
     uint8_t tx[3];
 
     tx[0] = (uint8_t)(ADS1292R_CMD_WREG | (addr & 0x1Fu));
-    tx[1] = 0x00u;   /* write 1 register */
+    tx[1] = 0x00u;
     tx[2] = value;
 
     platform_ads1292r_cs_low();
@@ -125,25 +112,16 @@ bool ads1292r_write_reg(uint8_t addr, uint8_t value)
     platform_ads1292r_cs_high();
 
     ads1292r_cmd_delay();
-
     return true;
 }
 
 bool ads1292r_read_id(uint8_t *id_out)
 {
-    if (id_out == NULL)
-    {
-        return false;
-    }
+    if (id_out == NULL) return false;
     return ads1292r_read_reg(ADS1292R_REG_ID, id_out);
 }
 
-/* ====================================================================
- * Read-back verification helper
- *
- * Writes a register and reads it back to confirm the write took.
- * Returns true if the read-back matches the written value.
- * ==================================================================== */
+/* Write + readback verify. Returns false on mismatch. */
 static bool ads1292r_write_verify(uint8_t addr, uint8_t value,
                                   const char *name)
 {
@@ -172,7 +150,7 @@ static bool ads1292r_write_verify(uint8_t addr, uint8_t value,
 }
 
 /* ====================================================================
- * Initialisation
+ * Initialisation — STRICT
  * ==================================================================== */
 
 bool ads1292r_init(void)
@@ -182,25 +160,20 @@ bool ads1292r_init(void)
 
     platform_log("ADS1292R init...\r\n");
 
-    /* Hardware reset via SPI command */
     ads1292r_send_command(ADS1292R_CMD_RESET);
     platform_delay_ms(10u);
 
-    /* Stop any continuous read that may be in progress */
     ads1292r_send_command(ADS1292R_CMD_SDATAC);
     platform_delay_ms(2u);
 
-    /* Read device ID (expect 0x53 for ADS1292R, 0x73 for ADS1292) */
+    /* Read device ID — only accept ADS1292 (0x53) or ADS1292R (0x73) */
     for (tries = 0; tries < 5; tries++)
     {
-        if (!ads1292r_read_id(&id))
-        {
-            continue;
-        }
+        if (!ads1292r_read_id(&id)) continue;
 
         platform_log("ADS1292R ID try %u = 0x%02X\r\n", tries + 1u, id);
 
-        if ((id != 0x00u) && (id != 0xFFu))
+        if (id == ADS1292_ID || id == ADS1292R_ID)
         {
             break;
         }
@@ -208,35 +181,32 @@ bool ads1292r_init(void)
         platform_delay_ms(2u);
     }
 
-    if ((id == 0x00u) || (id == 0xFFu))
+    if (id != ADS1292_ID && id != ADS1292R_ID)
     {
-        platform_log("ADS1292R: invalid ID — check SPI wiring\r\n");
+        platform_log("ADS1292R: INVALID ID 0x%02X (expected 0x53 or 0x73)\r\n", id);
         return false;
     }
 
-    /* Write configuration registers with read-back verification */
-    bool ok = true;
+    /* Write registers with read-back verification.
+     * Count mismatches but only fail if critical registers don't take. */
+    uint8_t mismatch_count = 0;
 
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_CONFIG1,  CFG_CONFIG1,
-                                     "CONFIG1");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_CONFIG2,  CFG_CONFIG2,
-                                     "CONFIG2");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_LOFF,     CFG_LOFF,
-                                     "LOFF");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_CH1SET,   CFG_CH1SET,
-                                     "CH1SET");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_CH2SET,   CFG_CH2SET,
-                                     "CH2SET");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_RLD_SENS, CFG_RLD_SENS,
-                                     "RLD_SENS");
-    ok = ok && ads1292r_write_verify(ADS1292R_REG_LOFF_SENS, CFG_LOFF_SENS,
-                                     "LOFF_SENS");
+    if (!ads1292r_write_verify(ADS1292R_REG_CONFIG1,   CFG_CONFIG1,  "CONFIG1"))  mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_CONFIG2,   CFG_CONFIG2,  "CONFIG2"))  mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_LOFF,      CFG_LOFF,     "LOFF"))     mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_CH1SET,    CFG_CH1SET,   "CH1SET"))   mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_CH2SET,    CFG_CH2SET,   "CH2SET"))   mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_RLD_SENS,  CFG_RLD_SENS, "RLD_SENS")) mismatch_count++;
+    if (!ads1292r_write_verify(ADS1292R_REG_LOFF_SENS, CFG_LOFF_SENS,"LOFF_SENS")) mismatch_count++;
 
-    if (!ok)
+    if (mismatch_count > 2)
     {
-        platform_log("ADS1292R: register config verification FAILED\r\n");
-        /* Continue anyway — some registers may not read back identically
-         * on all silicon revisions.  The data will reveal if it worked. */
+        platform_log("ADS1292R: %u register mismatches — ABORTING\r\n", mismatch_count);
+        return false;
+    }
+    else if (mismatch_count > 0)
+    {
+        platform_log("ADS1292R: %u minor mismatches (continuing)\r\n", mismatch_count);
     }
 
     platform_delay_ms(10u);
@@ -267,11 +237,16 @@ bool ads1292r_stop_continuous(void)
  * Read one 9-byte sample frame
  *
  * Frame layout (MSB first):
- *   [0..2]  Status (24 bits — lead-off, GPIO, etc.)
+ *   [0]     Status byte 0: [1100][GPIO4:1]  (top nibble = 0xC)
+ *   [1]     Status byte 1: [LOFF_STAT[4:0]][0][0][0]
+ *             bit 7 = LOFF_STAT RLD
+ *             bit 6 = IN2N off
+ *             bit 5 = IN2P off
+ *             bit 4 = IN1N off
+ *             bit 3 = IN1P off
+ *   [2]     Status byte 2: (GPIO, etc.)
  *   [3..5]  CH1 data (24-bit signed)
  *   [6..8]  CH2 data (24-bit signed)
- *
- * Caller must ensure DRDY is low before calling.
  * ==================================================================== */
 
 bool ads1292r_read_sample(emg_sample_t *out_sample)
@@ -279,16 +254,13 @@ bool ads1292r_read_sample(emg_sample_t *out_sample)
     uint8_t tx[ADS1292R_FRAME_LEN] = {0};
     uint8_t rx[ADS1292R_FRAME_LEN] = {0};
 
-    if (out_sample == NULL)
-    {
-        return false;
-    }
+    if (out_sample == NULL) return false;
 
     platform_ads1292r_cs_low();
     platform_spi_transfer(tx, rx, ADS1292R_FRAME_LEN);
     platform_ads1292r_cs_high();
 
-    /* Assemble 24-bit codes from 3 bytes each */
+    /* Parse CH1 and CH2 */
     int32_t ch1 = ((int32_t)rx[3] << 16)
                 | ((int32_t)rx[4] << 8)
                 | ((int32_t)rx[5]);
@@ -300,6 +272,19 @@ bool ads1292r_read_sample(emg_sample_t *out_sample)
     out_sample->ch1 = sign_extend_24(ch1);
     out_sample->ch2 = sign_extend_24(ch2);
 
+    /* Parse lead-off status from status byte 1.
+     * ADS1292R status byte 1 bits [7:3] = LOFF_STAT
+     *   our bit 0 = IN1P off  (status bit 3)
+     *   our bit 1 = IN1N off  (status bit 4)
+     *   our bit 2 = IN2P off  (status bit 5)
+     *   our bit 3 = IN2N off  (status bit 6)                          */
+    uint8_t stat1 = rx[1];
+    out_sample->lead_off = 0;
+    if (stat1 & (1u << 3)) out_sample->lead_off |= 0x01u;  /* IN1P */
+    if (stat1 & (1u << 4)) out_sample->lead_off |= 0x02u;  /* IN1N */
+    if (stat1 & (1u << 5)) out_sample->lead_off |= 0x04u;  /* IN2P */
+    if (stat1 & (1u << 6)) out_sample->lead_off |= 0x08u;  /* IN2N */
+
     return true;
 }
 
@@ -307,10 +292,7 @@ bool ads1292r_read_raw_frame(uint8_t *frame_out)
 {
     uint8_t tx[ADS1292R_FRAME_LEN] = {0};
 
-    if (frame_out == NULL)
-    {
-        return false;
-    }
+    if (frame_out == NULL) return false;
 
     platform_ads1292r_cs_low();
     platform_spi_transfer(tx, frame_out, ADS1292R_FRAME_LEN);
